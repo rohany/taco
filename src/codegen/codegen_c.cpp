@@ -40,15 +40,20 @@ const string cHeaders =
   "#ifndef TACO_TENSOR_T_DEFINED\n"
   "#define TACO_TENSOR_T_DEFINED\n"
   "typedef enum { taco_mode_dense, taco_mode_sparse } taco_mode_t;\n"
+  "typedef struct taco_tensor_slice_t {\n"
+  "  int32_t lo;\n"
+  "  int32_t hi;\n"
+  "} taco_tensor_slice_t;\n"
   "typedef struct {\n"
-  "  int32_t      order;         // tensor order (number of modes)\n"
-  "  int32_t*     dimensions;    // tensor dimensions\n"
-  "  int32_t      csize;         // component size\n"
-  "  int32_t*     mode_ordering; // mode storage ordering\n"
-  "  taco_mode_t* mode_types;    // mode storage types\n"
-  "  uint8_t***   indices;       // tensor index data (per mode)\n"
-  "  uint8_t*     vals;          // tensor values\n"
-  "  int32_t      vals_size;     // values array size\n"
+  "  int32_t      order;                     // tensor order (number of modes)\n"
+  "  int32_t*     dimensions;                // tensor dimensions\n"
+  "  int32_t      csize;                     // component size\n"
+  "  int32_t*     mode_ordering;             // mode storage ordering\n"
+  "  taco_mode_t* mode_types;                // mode storage types\n"
+  "  uint8_t***   indices;                   // tensor index data (per mode)\n"
+  "  uint8_t*     vals;                      // tensor values\n"
+  "  int32_t      vals_size;                 // values array size\n"
+  "  taco_tensor_slice_t* sliced_dimensions; // bounds of any windowed modes\n"
   "} taco_tensor_t;\n"
   "#endif\n"
   "int cmp(const void *a, const void *b) {\n"
@@ -187,6 +192,14 @@ protected:
   }
 
   virtual void visit(const VarDecl *op) {
+    // TODO (rohany): Why aren't we adding this variable to the varMap??? Is this a bug?
+    //  It seems like if we happen to declare a variable but then don't use it in the left
+    //  hand side of any expressions then we won't catch it and add it to the varMap?
+    // TODO (rohany): It doesn't seem like I need this anymore since I've turned the
+    //  slice dimensions into GetProperty elements. If we move away from that then
+    //  I'll need to bring this back.
+    // op->var.accept(this);
+
     if (!util::contains(localVars, op->var)) {
       localVars.push_back(op->var);
     }
@@ -515,7 +528,7 @@ void CodeGen_C::visit(const Allocate* op) {
     stream << ", ";
   }
   else {
-    stream << "malloc(";
+    stream << "calloc(1, ";
   }
   stream << "sizeof(" << elementType << ")";
   stream << " * ";

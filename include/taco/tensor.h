@@ -147,6 +147,11 @@ public:
   template <typename InputIterators>
   void setFromComponents(const InputIterators& begin, const InputIterators& end);
 
+
+  void sliceMode(int mode, int lo=-1, int hi=-1);
+
+  TensorBase sliceModeImmut(int mode, int lo=-1, int hi=-1);
+
   /* --- Read Methods        --- */
 
   template <typename CType>  
@@ -538,6 +543,12 @@ private:
                                 std::shared_ptr<ir::Module>>> KernelsCache;
   static KernelsCache computeKernels;
   static std::mutex computeKernelsMutex;
+
+  struct Window {
+    // TODO (rohany): Also store a tensorvar here?
+    TensorVar slicedVar;
+    std::map<int, taco_tensor_slice_t> slicedDims;
+  } window;
 };
 
 /// A reference to a tensor. Tensor object copies copies the reference, and
@@ -865,6 +876,9 @@ struct TensorBase::Content {
   bool               needsCompute;
   std::vector<std::weak_ptr<TensorBase::Content>> dependentTensors;
   unsigned int       uniqueId;
+
+  std::map<int, taco_tensor_slice_t> slicedDims;
+  std::vector<taco_tensor_slice_t> slicedDimsStorage;
 
   Content(std::string name, Datatype dataType, const std::vector<int>& dimensions,
           Format format)

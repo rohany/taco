@@ -132,6 +132,30 @@ LowererImpl::lower(IndexStmt stmt, string name,
     tensorVars.insert({temp, irVar});
   }
 
+  // TODO (rohany): Some late validation for now. Improve this later.
+  if (name == "compute" && compute) {
+    for (auto& t : results) {
+      for (auto& slice : t.getSlicedModes()) {
+        taco_uassert(t.getFormat().getModeFormats()[slice - 1] == ModeFormat::Dense)
+          << "all sliced result tensors must be dense";
+      }
+    }
+  }
+
+  // TODO (rohany): Remove.
+  // TODO (rohany): I'm not sure when these things are true vs not. It seemed to break
+  //  some tests when I added this slicing in every case, so I'll need clarification here.
+  // TODO (rohany): We also don't want this when generating iteration? Or it's fine if we
+  //  do, that information just needs to be passed down appropriately.
+  // As a twist, let's just slice every dimension for now.
+//  if (compute && !assemble && !pack && !unpack && name == "compute") {
+//      for (auto& t : arguments) {
+//          for(auto i = 0; i < t.getOrder(); i++) {
+//              t.slice(i+1);
+//          }
+//      }
+//  }
+
   // Create variables for keeping track of result values array capacity
   createCapacityVars(resultVars, &capacityVars);
 
@@ -165,17 +189,31 @@ LowererImpl::lower(IndexStmt stmt, string name,
   vector<IndexVar> indexVars = getIndexVars(stmt);
   for (auto& indexVar : indexVars) {
     Expr dimension;
+    // getDimensionForTensorVar extracts an Expr that holds the dimension
+    // of a particular tensor mode. This Expr should be used as a loop bound
+    // when iterating over the dimension of the target tensor.
+    auto getDimensionForTensorVar = [&](const TensorVar& tv, int loc) {
+      // If the tensor is sliced, then the dimension for iteration is the bounds
+      // of the slice. Otherwise, it is the actual dimension of the mode.
+      if (tv.getSlicedModes().count(loc + 1) != 0) {
+        auto lo = GetProperty::make(tensorVars.at(tv), TensorProperty::SliceLo, loc);
+        auto hi = GetProperty::make(tensorVars.at(tv), TensorProperty::SliceHi, loc);
+        return ir::Sub::make(hi, lo);
+      } else {
+        return GetProperty::make(tensorVars.at(tv), TensorProperty::Dimension, loc);
+      }
+    };
     match(stmt,
       function<void(const AssignmentNode*, Matcher*)>([&](
           const AssignmentNode* n, Matcher* m) {
         m->match(n->rhs);
         if (!dimension.defined()) {
           auto ivars = n->lhs.getIndexVars();
+          auto tv = n->lhs.getTensorVar();
           int loc = (int)distance(ivars.begin(),
                                   find(ivars.begin(),ivars.end(), indexVar));
-          if(!util::contains(temporariesSet, n->lhs.getTensorVar())) {
-            dimension = GetProperty::make(tensorVars.at(n->lhs.getTensorVar()),
-                                          TensorProperty::Dimension, loc);
+          if(!util::contains(temporariesSet, tv)) {
+            dimension = getDimensionForTensorVar(tv, loc);
           }
         }
       }),
@@ -186,8 +224,7 @@ LowererImpl::lower(IndexStmt stmt, string name,
                                   find(indexVars.begin(),indexVars.end(),
                                        indexVar));
           if(!util::contains(temporariesSet, n->tensorVar)) {
-            dimension = GetProperty::make(tensorVars.at(n->tensorVar),
-                                          TensorProperty::Dimension, loc);
+            dimension = getDimensionForTensorVar(n->tensorVar, loc);
           }
         }
       })
@@ -844,9 +881,15 @@ Stmt LowererImpl::lowerForallPosition(Forall forall, Iterator iterator,
 {
   Expr coordinate = getCoordinateVar(forall.getIndexVar());
   Stmt declareCoordinate = Stmt();
+  Stmt boundsGuard = Stmt();
   if (provGraph.isCoordVariable(forall.getIndexVar())) {
     Expr coordinateArray = iterator.posAccess(iterator.getPosVar(),
                                               coordinates(iterator)).getResults()[0];
+    if (iterator.isWindowed()) {
+        boundsGuard = this->upperBoundGuardForWindowPosition(iterator, coordinateArray);
+        coordinateArray = ir::Sub::make(coordinateArray, iterator.getWindowLowerBound());
+    }
+
     declareCoordinate = VarDecl::make(coordinate, coordinateArray);
   }
   if (forall.getParallelUnit() != ParallelUnit::NotParallel && forall.getOutputRaceStrategy() == OutputRaceStrategy::Atomics) {
@@ -880,6 +923,11 @@ Stmt LowererImpl::lowerForallPosition(Forall forall, Iterator iterator,
     boundsCompute = bounds.compute();
     startBound = bounds[0];
     endBound = bounds[1];
+    // If we have a window on this iterator, then search for the start of
+    // the window rather than starting at the beginning of the level.
+    if (iterator.isWindowed()) {
+        startBound = this->searchForStartOfWindowPosition(iterator, startBound, endBound);
+    }
   } else {
     taco_iassert(iterator.isOrdered() && iterator.getParent().isOrdered());
     taco_iassert(iterator.isCompact() && iterator.getParent().isCompact());
@@ -901,10 +949,12 @@ Stmt LowererImpl::lowerForallPosition(Forall forall, Iterator iterator,
            && forall.getOutputRaceStrategy() != OutputRaceStrategy::ParallelReduction && !ignoreVectorize) {
     kind = LoopKind::Runtime;
   }
+
   // Loop with preamble and postamble
-  return Block::blanks(boundsCompute,
+  return Block::blanks(
+                       boundsCompute,
                        For::make(iterator.getPosVar(), startBound, endBound, 1,
-                                 Block::make(declareCoordinate, body),
+                                 Block::make(boundsGuard, declareCoordinate, body),
                                  kind,
                                  ignoreVectorize ? ParallelUnit::NotParallel : forall.getParallelUnit(), ignoreVectorize ? 0 : forall.getUnrollFactor()),
                        posAppend);
@@ -1163,8 +1213,16 @@ Stmt LowererImpl::resolveCoordinate(std::vector<Iterator> mergers, ir::Expr coor
       // Just one position iterator so it is the resolved coordinate
       ModeFunction posAccess = merger.posAccess(merger.getPosVar(),
                                                 coordinates(merger));
-      Stmt resolution = emitVarDecl ? VarDecl::make(coordinate, posAccess[0]) : Assign::make(coordinate, posAccess[0]);
+      auto access = posAccess[0];
+      // TODO (rohany): Comment.
+      auto guard = Stmt();
+      if (merger.isWindowed()) {
+          guard = this->upperBoundGuardForWindowPosition(merger, access);
+          access = ir::Sub::make(access, merger.getWindowLowerBound());
+      }
+      Stmt resolution = emitVarDecl ? VarDecl::make(coordinate, access) : Assign::make(coordinate, access);
       return Block::make(posAccess.compute(),
+                         guard,
                          resolution);
     }
     else if (merger.hasCoordIter()) {
@@ -1944,7 +2002,14 @@ Stmt LowererImpl::declLocatePosVars(vector<Iterator> locators) {
         continue; // these will be recovered with separate procedure
       }
       do {
-        ModeFunction locate = locateIterator.locate(coordinates(locateIterator));
+        auto coords = coordinates(locateIterator);
+        // TODO (rohany): Improve comment.
+        //  Apply bounds to the coordinate.
+        if (locateIterator.isWindowed()) {
+          auto expr = coords[coords.size() - 1];
+          coords[coords.size() - 1] = ir::Add::make(expr, locateIterator.getWindowLowerBound());
+        }
+        ModeFunction locate = locateIterator.locate(coords);
         taco_iassert(isValue(locate.getResults()[1], true));
         Stmt declarePosVar = VarDecl::make(locateIterator.getPosVar(),
                                            locate.getResults()[0]);
@@ -2055,7 +2120,14 @@ Stmt LowererImpl::codeToInitializeIteratorVar(Iterator iterator, vector<Iterator
         }
       }
       else {
-        result.push_back(VarDecl::make(iterVar, bounds[0]));
+        auto bound = bounds[0];
+        // If we have a window on this iterator, then search for the start of
+        // the window rather than starting at the beginning of the level.
+        if (iterator.isWindowed()) {
+            bound = this->searchForStartOfWindowPosition(iterator, bounds[0], bounds[1]);
+        }
+
+        result.push_back(VarDecl::make(iterVar, bound));
       }
 
       result.push_back(VarDecl::make(endVar, bounds[1]));
@@ -2217,13 +2289,18 @@ Stmt LowererImpl::codeToLoadCoordinatesFromPosIterators(vector<Iterator> iterato
       ModeFunction posAccess = posIter.posAccess(posIter.getPosVar(),
                                                  coordinates(posIter));
       loadPosIterCoordinateStmts.push_back(posAccess.compute());
+      auto access = posAccess[0];
+      if (posIter.isWindowed()) {
+          loadPosIterCoordinateStmts.push_back(this->upperBoundGuardForWindowPosition(posIter, access));
+          access = ir::Sub::make(access, posIter.getWindowLowerBound());
+      }
       if (declVars) {
         loadPosIterCoordinateStmts.push_back(VarDecl::make(posIter.getCoordVar(),
-                                                           posAccess[0]));
+                                                           access));
       }
       else {
         loadPosIterCoordinateStmts.push_back(Assign::make(posIter.getCoordVar(),
-                                                          posAccess[0]));
+                                                          access));
       }
     }
     loadPosIterCoordinates = Block::make(loadPosIterCoordinateStmts);
@@ -2360,6 +2437,27 @@ Expr LowererImpl::checkThatNoneAreExhausted(std::vector<Iterator> iterators)
   return (!result.empty())
          ? taco::ir::conjunction(result)
          : Lt::make(iterators[0].getIteratorVar(), iterators[0].getEndVar());
+}
+
+Expr LowererImpl::searchForStartOfWindowPosition(Iterator iterator, ir::Expr start, ir::Expr end) {
+    taco_iassert(iterator.isWindowed());
+    vector<Expr> args = {
+            // Search over the `crd` array of the level,
+            iterator.getMode().getModePack().getArray(1),
+            // between the start and end position,
+            start, end,
+            // for the beginning of the window.
+            iterator.getWindowLowerBound(),
+    };
+    return Call::make("taco_binarySearchAfter", args, Datatype::UInt64);
+}
+
+Stmt LowererImpl::upperBoundGuardForWindowPosition(Iterator iterator, ir::Expr access) {
+    taco_iassert(iterator.isWindowed());
+    return ir::IfThenElse::make(
+            ir::Gte::make(access, iterator.getWindowUpperBound()),
+            ir::Break::make()
+    );
 }
 
 }

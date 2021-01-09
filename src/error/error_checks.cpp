@@ -48,6 +48,13 @@ bool dimensionsTypecheck(const std::vector<IndexVar>& resultVars,
       IndexVar var = readNode->indexVars[mode];
       Dimension dimension =
           readNode->tensorVar.getType().getShape().getDimension(mode);
+
+      auto slice = readNode->tensorVar.getSlicedModeDims().find(mode);
+      if (slice != readNode->tensorVar.getSlicedModeDims().end()) {
+        // TODO (rohany): I want a deep copy of the dimension here.
+        dimension = Dimension(slice->second);
+      }
+
       if (util::contains(indexVarDims,var) &&
           indexVarDims.at(var) != dimension) {
         return false;

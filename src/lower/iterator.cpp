@@ -28,6 +28,16 @@ struct Iterator::Content {
   ir::Expr segendVar;
   ir::Expr validVar;
   ir::Expr beginVar;
+
+  // Window represents a window (or slice) into a tensor mode, given by
+  // the expressions representing an upper and lower bound. An iterator
+  // is windowed if window is not NULL.
+  struct Window {
+      ir::Expr lo;
+      ir::Expr hi;
+      Window(ir::Expr _lo, ir::Expr _hi) : lo(_lo), hi(_hi) {};
+  };
+  std::unique_ptr<Window> window;
 };
 
 Iterator::Iterator() : content(nullptr) {
@@ -323,6 +333,24 @@ bool Iterator::defined() const {
   return content != nullptr;
 }
 
+bool Iterator::isWindowed() const {
+  return this->content->window != nullptr;
+}
+
+ir::Expr Iterator::getWindowLowerBound() const {
+  taco_iassert(this->isWindowed());
+  return this->content->window->lo;
+}
+
+ir::Expr Iterator::getWindowUpperBound() const {
+  taco_iassert(this->isWindowed());
+  return this->content->window->hi;
+}
+
+void Iterator::setWindowBounds(ir::Expr lo, ir::Expr hi) {
+  this->content->window = std::make_unique<Content::Window>(Content::Window(lo, hi));
+}
+
 bool operator==(const Iterator& a, const Iterator& b) {
   if (a.isDimensionIterator() && b.isDimensionIterator()) {
     return a.getIndexVar() == b.getIndexVar();
@@ -425,6 +453,23 @@ Iterators::Iterators(IndexStmt stmt, const map<TensorVar, Expr>& tensorVars)
     })
   );
 
+  // TODO (rohany): Add comments to this.
+  // Adjust iterators that operate on sliced tensor dimensions.
+  for (auto& pair : tensorVars) {
+      auto t = pair.first;
+      auto tExpr = tensorVars.at(t);
+      for (auto& mode : t.getSlicedModes()) {
+          auto lo = ir::GetProperty::make(tExpr, TensorProperty::SliceLo, mode - 1);
+          auto hi = ir::GetProperty::make(tExpr, TensorProperty::SliceHi, mode - 1);
+          for (auto& it : this->content->levelIterators) {
+              if (it.first.getAccess().getTensorVar() == t && it.first.getModePos() == (size_t)mode) {
+                  it.second.setWindowBounds(lo, hi);
+              }
+          }
+          // TODO (rohany): What sort of touching up needs to be done to the modeIterators object?
+      }
+  }
+
   // Reverse the levelITerators map for fast modeAccess lookup
   for (auto& iterator : content->levelIterators) {
     content->modeAccesses.insert({iterator.second, iterator.first});
@@ -507,7 +552,6 @@ ModeAccess Iterators::modeAccess(Iterator iterator) const
   taco_iassert(util::contains(content->modeAccesses, iterator));
   return content->modeAccesses.at(iterator);
 }
-
 
 Iterator Iterators::modeIterator(IndexVar indexVar) const
 {

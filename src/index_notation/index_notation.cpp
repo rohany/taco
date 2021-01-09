@@ -763,6 +763,21 @@ static void check(Assignment assignment) {
   auto freeVars = assignment.getLhs().getIndexVars();
   auto indexExpr = assignment.getRhs();
   auto shape = tensorVar.getType().getShape();
+  // TODO (rohany): Comment and deduplicate with the code in isValid().
+  if (!tensorVar.getSlicedModes().empty()) {
+    vector<Dimension> dims(shape.getOrder());
+    for (int i = 0; i < shape.getOrder();i++) {
+      dims[i] = shape.getDimension(i);
+      auto slices = tensorVar.getSlicedModeDims();
+      auto slice = slices.find(i);
+      if (slice != slices.end()) {
+        // TODO (rohany): Again, I want a deep copy of the dimension, rather than
+        //  assuming that it has a size.
+        dims[i] = Dimension(slice->second);
+      }
+    }
+    shape = Shape(dims);
+  }
   taco_uassert(error::dimensionsTypecheck(freeVars, indexExpr, shape))
       << error::expr_dimension_mismatch << " "
       << error::dimensionTypecheckErrors(freeVars, indexExpr, shape);
@@ -1820,7 +1835,29 @@ struct TensorVar::Content {
   Type type;
   Format format;
   Schedule schedule;
+
+  // TODO (rohany): This is hacking.
+  set<int> slicedModes;
+  map<int, size_t> slicedModeDims;
 };
+
+void TensorVar::slice(int mode) {
+    // TODO (rohany): We would do some validation here.
+    this->content->slicedModes.insert(mode);
+}
+
+const std::set<int>& TensorVar::getSlicedModes() const {
+    return this->content->slicedModes;
+}
+
+const std::map<int, size_t>& TensorVar::getSlicedModeDims() const {
+    return this->content->slicedModeDims;
+}
+
+void TensorVar::setModeDimension(int mode, int value) {
+    this->content->slicedModeDims[mode] = value;
+//    this->content->type.getShape().setDimensionSize(mode, value);
+}
 
 TensorVar::TensorVar() : content(nullptr) {
 }
@@ -1952,6 +1989,21 @@ static bool isValid(Assignment assignment, string* reason) {
   auto result = lhs.getTensorVar();
   auto freeVars = lhs.getIndexVars();
   auto shape = result.getType().getShape();
+  // TODO (rohany): Comment.
+  if (!result.getSlicedModes().empty()) {
+    vector<Dimension> dims(shape.getOrder());
+    for (int i = 0; i < shape.getOrder();i++) {
+      dims[i] = shape.getDimension(i);
+      auto slices = result.getSlicedModeDims();
+      auto slice = slices.find(i);
+      if (slice != slices.end()) {
+        // TODO (rohany): Again, I want a deep copy of the dimension, rather than
+        //  assuming that it has a size.
+        dims[i] = Dimension(slice->second);
+      }
+    }
+    shape = Shape(dims);
+  }
   if(!error::dimensionsTypecheck(freeVars, rhs, shape)) {
     *reason = error::expr_dimension_mismatch + " " +
               error::dimensionTypecheckErrors(freeVars, rhs, shape);

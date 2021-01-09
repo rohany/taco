@@ -905,6 +905,11 @@ public:
   friend bool operator==(const TensorVar&, const TensorVar&);
   friend bool operator<(const TensorVar&, const TensorVar&);
 
+  void slice(int mode);
+  const std::set<int>& getSlicedModes() const;
+  const std::map<int, size_t>& getSlicedModeDims() const;
+  void setModeDimension(int mode, int value);
+
 private:
   struct Content;
   std::shared_ptr<Content> content;

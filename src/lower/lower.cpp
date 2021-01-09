@@ -50,6 +50,8 @@ ir::Stmt lower(IndexStmt stmt, std::string name,
       << "Not lowerable, because " << reason << ": " << stmt;
   ir::Stmt lowered = lowerer.getLowererImpl()->lower(stmt, name, assemble, compute, pack, unpack);
 
+//  cout << "LOWERED IR:\n" << lowered << endl;
+
   // TODO: re-enable this
   // std::string messages;
   // verify(lowered, &messages);

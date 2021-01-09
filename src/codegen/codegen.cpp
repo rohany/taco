@@ -255,13 +255,20 @@ string CodeGen::unpackTensorProperty(string varname, const GetProperty* op,
     tp = "int";
     ret << tp << " " << varname << " = (int)(" << tensor->name
         << "->dimensions[" << op->mode << "]);\n";
-  } else {
-    taco_iassert(op->property == TensorProperty::Indices);
+  } else if (op->property == TensorProperty::Indices) {
     tp = "int*";
     auto nm = op->index;
     ret << tp << " " << restrictKeyword() << " " << varname << " = ";
     ret << "(int*)(" << tensor->name << "->indices[" << op->mode;
     ret << "][" << nm << "]);\n";
+  } else if (op->property == TensorProperty::SliceLo) {
+    tp = "int";
+    ret << tp << " " << varname << " = (int)(" << tensor->name
+        << "->sliced_dimensions[" << op->mode << "].lo);\n";
+  } else if (op->property == TensorProperty::SliceHi) {
+    tp = "int";
+    ret << tp << " " << varname << " = (int)(" << tensor->name
+        << "->sliced_dimensions[" << op->mode << "].hi);\n";
   }
 
   return ret.str();
@@ -290,13 +297,15 @@ string CodeGen::packTensorProperty(string varname, Expr tnsr,
   // all others are int*
   if (property == TensorProperty::Dimension) {
     return "";
-  } else {
-    taco_iassert(property == TensorProperty::Indices);
+  } else if (property == TensorProperty::Indices) {
     tp = "int*";
     auto nm = index;
     ret << tensor->name << "->indices" <<
         "[" << mode << "][" << nm << "] = (uint8_t*)(" << varname
         << ");\n";
+  } else if (property == TensorProperty::SliceLo || property == TensorProperty::SliceHi) {
+    // Slices are constructed by TACO, so they aren't packed into the tensor here.
+    return "";
   }
 
   return ret.str();

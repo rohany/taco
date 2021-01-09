@@ -857,6 +857,12 @@ Expr GetProperty::make(Expr tensor, TensorProperty property, int mode) {
     case TensorProperty::ValuesSize:
       gp->name = tensorVar->name + "_vals_size";
       break;
+    case TensorProperty::SliceLo:
+      gp->name = tensorVar->name + util::toString(mode + 1) + "_slice_lo";
+      break;
+    case TensorProperty::SliceHi:
+      gp->name = tensorVar->name + util::toString(mode + 1) + "_slice_hi";
+      break;
   }
   
   return gp;

@@ -171,6 +171,9 @@ const Datatype& TensorBase::getComponentType() const {
 }
 
 const TensorVar& TensorBase::getTensorVar() const {
+  if (!this->window.slicedDims.empty()) {
+    return this->window.slicedVar;
+  }
   return content->tensorVar;
 }
 
@@ -274,6 +277,52 @@ static size_t unpackTensorData(const taco_tensor_t& tensorData,
   storage.setIndex(Index(format, modeIndices));
   storage.setValues(Array(tensor.getComponentType(), tensorData.vals, numVals));
   return numVals;
+}
+
+// TODO (rohany): Move this into a better place.
+void TensorBase::sliceMode(int mode, int lo, int hi) {
+    // TODO (rohany): I might want to not set things to -1 here, I don't think the
+    //  rest of the code should have to handle / check for -1's.
+    this->content->slicedDims[mode].lo = lo;
+    this->content->slicedDims[mode].hi = hi;
+
+    auto setLo = lo != -1 ? lo : 0;
+    auto setHi = hi != -1 ? hi : this->getDimension(mode - 1);
+    auto size = setHi - setLo;
+
+    this->content->tensorVar.slice(mode);
+    this->content->tensorVar.setModeDimension(mode - 1, size);
+}
+
+TensorBase TensorBase::sliceModeImmut(int mode, int lo, int hi) {
+  // TODO (rohany): Notes / Thoughts:
+  //  * For now, let's not worry about inserts into sliced tensors.
+  //  * I think that we want to share the whole content object between the
+  //    returned object and the original object.
+  //  * However, I think that we want a new TensorVar, and STL containers
+  //    to hold the slicing information.
+  auto tv = this->getTensorVar();
+  auto copy = *this;
+  // TODO (rohany): I might want to not set things to -1 here, I don't think the
+  //  rest of the code should have to handle / check for -1's.
+  copy.window.slicedDims[mode].lo = lo;
+  copy.window.slicedDims[mode].hi = hi;
+
+  copy.window.slicedVar = TensorVar(tv.getId(), tv.getName(), tv.getType(), tv.getFormat());
+  for (auto& slice : tv.getSlicedModes()) {
+    copy.window.slicedVar.slice(slice);
+  }
+  for (auto& slice : tv.getSlicedModeDims()) {
+    copy.window.slicedVar.setModeDimension(slice.first, slice.second);
+  }
+
+  auto setLo = lo != -1 ? lo : 0;
+  auto setHi = hi != -1 ? hi : this->getDimension(mode - 1);
+  auto size = setHi - setLo;
+  copy.window.slicedVar.slice(mode);
+  copy.window.slicedVar.setModeDimension(mode - 1, size);
+
+  return copy;
 }
 
 /// Pack coordinates into a data structure given by the tensor format.
@@ -744,6 +793,58 @@ void TensorBase::compute() {
   }
 
   auto arguments = packArguments(*this);
+
+  // This can probably go into pack arguments? Ideally, this stuff should
+  // go down to when the actual tensorStorage object is created.
+  auto tensorArgs = getArguments(makeConcreteNotation(this->getAssignment()));
+  auto tensors = getTensors(this->getAssignment().getRhs());
+  // TODO (rohany): It would be simpler to just setup the slice on calls to pack or
+  //  when doing the slice itself.
+  // TODO (rohany): Skip the first argument for now, since pack places the LHS in the
+  //  first position of the slice.
+  for (size_t j = 0; j < arguments.size(); j++) {
+    // TODO (rohany): Offset this back down.
+    TensorVar arg;
+    TensorBase tb;
+    if (j == 0) {
+      arg = this->getTensorVar();
+      tb = *this;
+    } else {
+      arg = tensorArgs[j - 1];
+      tb = tensors[arg];
+    }
+    auto slicedDims = tb.window.slicedDims.empty() ? tb.content->slicedDims : tb.window.slicedDims;
+    auto modes = arg.getSlicedModes();
+    auto order = tb.getOrder();
+    auto td = (taco_tensor_t*)arguments[j];
+    if (!slicedDims.empty()) {
+      std::vector<taco_tensor_slice_t> slices(order);
+      for (int i = 0; i < order; i++) {
+          slices[i].lo = 0;
+          slices[i].hi = tb.getDimension(i);
+          auto slice = slicedDims.find(i+1);
+          if (slice != slicedDims.end()) {
+              if (slice->second.lo != -1) slices[i].lo = slice->second.lo;
+              if (slice->second.hi != -1) slices[i].hi = slice->second.hi;
+          }
+      }
+      tb.content->slicedDimsStorage = std::move(slices);
+      td->sliced_dimensions = tb.content->slicedDimsStorage.data();
+    } else if (!modes.empty()) {
+       // TODO (rohany): This modes adjustment is a hack to run all of the tests with windowing.
+       //  I don't think that there is a real situation where a tensor variable is sliced
+       //  but not the tensor mode itself.
+       tb.content->slicedDimsStorage = std::vector<taco_tensor_slice_t>(order);
+       for (int i = 0; i < order; i++) {
+           if (modes.count(i + 1) != 0) {
+               tb.content->slicedDimsStorage[i].lo = 0;
+               tb.content->slicedDimsStorage[i].hi = tb.getDimension(i);
+           }
+       }
+       td->sliced_dimensions = tb.content->slicedDimsStorage.data();
+    }
+  }
+
   this->content->module->callFuncPacked("compute", arguments.data());
 
   if (content->assembleWhileCompute) {

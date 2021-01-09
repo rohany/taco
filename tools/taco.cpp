@@ -523,7 +523,9 @@ int main(int argc, char* argv[]) {
 
   vector<string> kernelFilenames;
 
-  vector<string> scheduleCommands; 
+  vector<string> scheduleCommands;
+
+  map<string, vector<int>> slicedModes;
 
   for (int i = 1; i < argc; i++) {
     string arg = argv[i];
@@ -599,6 +601,16 @@ int main(int argc, char* argv[]) {
         }
       }
       formats.insert({tensorName, Format(modeTypePacks, modeOrdering)});
+    }
+    else if ("-w" == argName) {
+      vector<string> descriptor = util::split(argValue, ":");
+      if (descriptor.size() != 2) {
+        return reportError("Incorrect slice descriptor", 3);
+      }
+      string tensorName = descriptor[0];
+      string modeString = descriptor[1];
+      int mode = stoi(modeString);
+      slicedModes[tensorName].push_back(mode);
     }
     else if ("-t" == argName) {
       vector<string> descriptor = util::split(argValue, ":");
@@ -925,6 +937,18 @@ int main(int argc, char* argv[]) {
   IndexStmt stmt =
       makeConcreteNotation(makeReductionNotation(tensor.getAssignment()));
   stmt = reorderLoopsTopologically(stmt);
+
+  auto results = getResults(stmt);
+  auto args = getArguments(stmt);
+  results.insert(results.end(), args.begin(), args.end());
+  for (auto& t : results) {
+      auto slices = slicedModes.find(t.getName());
+      if (slices != slicedModes.end()) {
+          for (auto& mode : slices->second) {
+              t.slice(mode);
+          }
+      }
+  }
 
   if (setSchedule) {
     stringstream scheduleStream; 

@@ -76,7 +76,9 @@ enum class TensorProperty {
   ModeTypes,
   Indices,
   Values,
-  ValuesSize
+  ValuesSize,
+  SliceLo,
+  SliceHi,
 };
 
 /** Base class for backend IR */

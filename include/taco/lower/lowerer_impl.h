@@ -337,13 +337,13 @@ protected:
   /// Recovers a derived indexvar from an underived variable.
   ir::Stmt codeToRecoverDerivedIndexVar(IndexVar underived, IndexVar indexVar, bool emitVarDecl);
 
-    /// Conditionally increment iterator position variables.
+  /// Conditionally increment iterator position variables.
   ir::Stmt codeToIncIteratorVars(ir::Expr coordinate, IndexVar coordinateVar,
           std::vector<Iterator> iterators, std::vector<Iterator> mergers);
 
   ir::Stmt codeToLoadCoordinatesFromPosIterators(std::vector<Iterator> iterators, bool declVars);
 
-    /// Create statements to append coordinate to result modes.
+  /// Create statements to append coordinate to result modes.
   ir::Stmt appendCoordinate(std::vector<Iterator> appenders, ir::Expr coord);
 
   /// Create statements to append positions to result modes.
@@ -353,8 +353,17 @@ protected:
   /// Create an expression to index into a tensor value array.
   ir::Expr generateValueLocExpr(Access access) const;
 
-  /// Expression that evaluates to true if none of the iteratators are exhausted
+  /// Expression that evaluates to true if none of the iterators are exhausted
   ir::Expr checkThatNoneAreExhausted(std::vector<Iterator> iterators);
+
+  /// Expression that returns the beginning of a window to iterate over
+  /// in a compressed iterator. It is used when operating over windows of
+  /// tensors, instead of the full tensor.
+  ir::Expr searchForStartOfWindowPosition(Iterator iterator, ir::Expr start, ir::Expr end);
+
+  /// Statement that guards against going out of bounds of the window that
+  /// the input iterator was configured with.
+  ir::Stmt upperBoundGuardForWindowPosition(Iterator iterator, ir::Expr access);
 
 private:
   bool assemble;
