@@ -72,6 +72,16 @@ TEST(scheduling, splitIndexStmt) {
   ASSERT_TRUE(equals(a(i) = b(i), i2Forall.getStmt()));
 }
 
+TEST(scheduling, fuseBug) {
+    Tensor<double> A("A", {4, 4}, {Dense, Dense});
+    Tensor<double> B("B", {4, 4}, {Dense, Dense});
+    Tensor<double> C("C", {4, 4}, {Dense, Dense});
+    IndexVar i("i"), j("j"), f("f");
+    C(i, j) = A(i, j) * B(i, j);
+    auto stmt = C.getAssignment().concretize();
+    C.compile(stmt.fuse(i, j, f));
+}
+
 TEST(scheduling, lowerDenseMatrixMul) {
   Tensor<double> A("A", {4, 4}, {Dense, Dense});
   Tensor<double> B("B", {4, 4}, {Dense, Dense});
