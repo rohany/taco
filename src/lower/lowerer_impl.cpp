@@ -1706,8 +1706,10 @@ Expr LowererImpl::lowerAccess(Access access) {
     return getTensorVar(var);
   }
 
-  return getIterators(access).back().isUnique()
-         ? Load::make(getValuesArray(var), generateValueLocExpr(access))
+  auto iter = getIterators(access).back();
+  auto gp = GetProperty::make(this->tensorVars.at(var), TensorProperty::Dimension, iter.getMode().getLevel());
+  return iter.isUnique()
+         ? Load::make(getValuesArray(var), generateValueLocExpr(access), gp)
          : getReducedValueVar(access);
 }
 

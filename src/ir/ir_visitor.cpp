@@ -152,6 +152,7 @@ void IRVisitor::visit(const Switch* op) {
 void IRVisitor::visit(const Load* op) {
   op->arr.accept(this);
   op->loc.accept(this);
+  if (op->bounds.defined()) op->bounds.accept(this);
 }
 
 void IRVisitor::visit(const Malloc* op) {

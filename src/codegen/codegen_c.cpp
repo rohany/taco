@@ -27,6 +27,7 @@ namespace {
 const string cHeaders =
   "#ifndef TACO_C_HEADERS\n"
   "#define TACO_C_HEADERS\n"
+  "#include <assert.h>\n"
   "#include <stdio.h>\n"
   "#include <stdlib.h>\n"
   "#include <stdint.h>\n"
@@ -37,6 +38,7 @@ const string cHeaders =
   "#define TACO_MIN(_a,_b) ((_a) < (_b) ? (_a) : (_b))\n"
   "#define TACO_MAX(_a,_b) ((_a) > (_b) ? (_a) : (_b))\n"
   "#define TACO_DEREF(_a) (((___context___*)(*__ctx__))->_a)\n"
+  "#define TACO_ACCESS(_arr,_pos,_bound) ((_pos >= 0 && _pos < bound ? (_arr[_pos]) : (assert(false)))\n"
   "#ifndef TACO_TENSOR_T_DEFINED\n"
   "#define TACO_TENSOR_T_DEFINED\n"
   "typedef enum { taco_mode_dense, taco_mode_sparse } taco_mode_t;\n"

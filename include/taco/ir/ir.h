@@ -487,8 +487,11 @@ struct Load : public ExprNode<Load> {
   Expr arr;
   Expr loc;
 
+  Expr bounds;
+
   static Expr make(Expr arr);
   static Expr make(Expr arr, Expr loc);
+  static Expr make(Expr arr, Expr loc, Expr bounds);
 
   static const IRNodeType _type_info = IRNodeType::Load;
 };

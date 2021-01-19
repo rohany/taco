@@ -257,11 +257,12 @@ void IRRewriter::visit(const Switch* op) {
 void IRRewriter::visit(const Load* op) {
   Expr arr = rewrite(op->arr);
   Expr loc = rewrite(op->loc);
-  if (arr == op->arr && loc == op->loc) {
+  Expr bounds = rewrite(op->bounds);
+  if (arr == op->arr && loc == op->loc && bounds == op->bounds) {
     expr = op;
   }
   else {
-    expr = loc.defined() ? Load::make(arr, loc) : Load::make(arr);
+    expr = loc.defined() ? Load::make(arr, loc, bounds) : Load::make(arr);
   }
 }
 

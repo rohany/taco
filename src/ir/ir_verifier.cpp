@@ -208,6 +208,7 @@ protected:
     }
     op->arr.accept(this);
     op->loc.accept(this);
+    if (op->bounds.defined()) op->bounds.accept(this);
   }
   
   void visit(const Store *op) {

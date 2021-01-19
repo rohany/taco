@@ -506,6 +506,18 @@ Expr Load::make(Expr arr, Expr loc) {
   return load;
 }
 
+Expr Load::make(Expr arr, Expr loc, Expr bounds) {
+  taco_iassert(loc.type().isInt() || loc.type().isUInt())
+      << "Can't load from a non-integer offset";
+  Load *load = new Load;
+  load->type = arr.type();
+  load->arr = arr;
+  load->loc = loc;
+  taco_iassert(bounds.defined());
+  load->bounds = bounds;
+  return load;
+}
+
 // Malloc
 Expr Malloc::make(Expr size) {
   taco_iassert(size.defined());

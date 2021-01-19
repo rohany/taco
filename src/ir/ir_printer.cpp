@@ -341,12 +341,24 @@ void IRPrinter::visit(const Switch* op) {
 }
 
 void IRPrinter::visit(const Load* op) {
-  parentPrecedence = Precedence::LOAD;
-  op->arr.accept(this);
-  stream << "[";
-  parentPrecedence = Precedence::LOAD;
-  op->loc.accept(this);
-  stream << "]";
+  if (op->bounds.defined()) {
+    stream << "TACO_ACCESS(";
+    parentPrecedence = Precedence::LOAD;
+    op->arr.accept(this);
+    stream << ",";
+    parentPrecedence = Precedence::LOAD;
+    op->loc.accept(this);
+    stream << ",";
+    op->bounds.accept(this);
+    stream << ")";
+  } else {
+    parentPrecedence = Precedence::LOAD;
+    op->arr.accept(this);
+    stream << "[";
+    parentPrecedence = Precedence::LOAD;
+    op->loc.accept(this);
+    stream << "]";
+  }
 }
 
 void IRPrinter::visit(const Malloc* op) {
