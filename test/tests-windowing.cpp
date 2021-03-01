@@ -530,3 +530,32 @@ TEST(windowing, lhsIndexSet) {
   a.evaluate();
   ASSERT_TRUE(equals(a, expected)) << a << endl << expected << endl;
 }
+
+TEST(bounds, inferenceSimple) {
+  auto dim = 10;
+  Tensor<int> a("a", {dim}, {Dense});
+  Tensor<int> b("b", {dim}, {Dense});
+  IndexVar i("i"), i1("i1"), i2("i2");
+  a(i) = b(i);
+  auto stmt = a.getAssignment().concretize().split(i, i1, i2, 5);
+  auto res = lower(stmt, "weija", false, true, false, false);
+}
+
+TEST(bounds, inferenceMM) {
+  auto dim = 10;
+  Tensor<int> a("a", {dim, dim}, {Dense, Dense});
+  Tensor<int> b("b", {dim, dim}, {Dense, Dense});
+  Tensor<int> c("c", {dim, dim}, {Dense, Dense});
+  IndexVar i("i"), j("j"), k("k");
+  IndexVar iNode("iNode"), iLocal("iLocal"), jNode("jNode"), jLocal("jLocal");
+  IndexVar k1("k1"), k2("k2");
+  c(i, j) = a(i, k) * b(k, j);
+  // auto stmt = c.getAssignment().concretize().divide(i, iNode, iLocal, 2).divide(j, jNode, jLocal, 2).reorder({iNode, jNode, k, iLocal, jLocal});
+  auto stmt = c.getAssignment().concretize()
+      .divide(i, iNode, iLocal, 2)
+      .divide(j, jNode, jLocal, 2)
+      .divide(k, k1, k2, 8)
+      .reorder({iNode, jNode, k1, iLocal, jLocal, k2});
+  auto res = lower(stmt, "weija", false, true, false, false);
+  // cout << "lowered = " << endl << res << endl;
+}
