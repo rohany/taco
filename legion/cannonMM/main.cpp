@@ -55,13 +55,6 @@ void top_level_task(const Task* task, const std::vector<PhysicalRegion>& regions
   auto C = runtime->create_logical_region(ctx, ispace, fspace); runtime->attach_name(C, "C");
   tacoFill<valType>(ctx, runtime, A, 0); tacoFill<valType>(ctx, runtime, B, 1); tacoFill<valType>(ctx, runtime, C, 1);
 
-  // Place the tensors.
-  auto part = placeLegionA(ctx, runtime, A, gx, gy);
-  placeLegionB(ctx, runtime, B, gx, gy);
-  placeLegionC(ctx, runtime, C, gx, gy);
-
-  initCuBLAS(ctx, runtime);
-
   // Compute on the tensors.
   benchmark(ctx, runtime, [&]() { computeLegion(ctx, runtime, A, B, C, gx, gy); });
 

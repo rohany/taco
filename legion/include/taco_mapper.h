@@ -20,13 +20,13 @@ public:
     PLACEMENT = (1 << 5),
   };
 
-  void select_sharding_functor(const Legion::Mapping::MapperContext ctx,
-                               const Legion::Task& task,
-                               const SelectShardingFunctorInput& input,
-                               SelectShardingFunctorOutput& output) override {
-    // Use TACO's sharding functor instead of the default sharding functor.
-    output.chosen_functor = TACOShardingFunctorID;
-  }
+  // void select_sharding_functor(const Legion::Mapping::MapperContext ctx,
+  //                              const Legion::Task& task,
+  //                              const SelectShardingFunctorInput& input,
+  //                              SelectShardingFunctorOutput& output) override {
+  //   // Use TACO's sharding functor instead of the default sharding functor.
+  //   output.chosen_functor = TACOShardingFunctorID;
+  // }
 
   void default_policy_select_constraints(Legion::Mapping::MapperContext ctx,
                                          Legion::LayoutConstraintSet &constraints, Legion::Memory target_memory,
@@ -74,6 +74,7 @@ public:
     auto kind = this->default_find_preferred_variant(task, ctx, false /* needs tight bounds */).proc_kind;
     // We always map to the same address space if replication is enabled.
     auto sameAddressSpace = ((task.tag & DefaultMapper::SAME_ADDRESS_SPACE) != 0) || this->replication_enabled;
+    // auto sameAddressSpace = ((task.tag & DefaultMapper::SAME_ADDRESS_SPACE) != 0);
     if (sameAddressSpace) {
       // If we are meant to stay local, then switch to return the appropriate
       // cached processors.
