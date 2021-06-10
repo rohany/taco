@@ -49,12 +49,17 @@ void top_level_task(const Task* task, const std::vector<PhysicalRegion>& regions
   auto A = runtime->create_logical_region(ctx, ispace, fspace); runtime->attach_name(A, "A");
   auto B = runtime->create_logical_region(ctx, ispace, fspace); runtime->attach_name(B, "B");
   auto C = runtime->create_logical_region(ctx, ispace, fspace); runtime->attach_name(C, "C");
-  tacoFill<valType>(ctx, runtime, A, 0); tacoFill<valType>(ctx, runtime, B, 1); tacoFill<valType>(ctx, runtime, C, 1);
 
-  // Place the tensors.
+  // Partition the tensors.
   auto apart = partitionLegionA(ctx, runtime, A, gd);
   auto bpart = partitionLegionA(ctx, runtime, B, gd);
   auto cpart = partitionLegionA(ctx, runtime, C, gd);
+
+  tacoFill<valType>(ctx, runtime, A, apart, 0);
+  tacoFill<valType>(ctx, runtime, B, bpart, 1);
+  tacoFill<valType>(ctx, runtime, C, cpart, 1);
+
+  // Place the tensors.
 
   placeLegionA(ctx, runtime, A, apart, gd, true);
   placeLegionA(ctx, runtime, B, bpart, gd);
@@ -63,9 +68,9 @@ void top_level_task(const Task* task, const std::vector<PhysicalRegion>& regions
 //  auto cpart = placeLegionC(ctx, runtime, C, gd);
 
   // Compute on the tensors.
-  benchmark([&]() { computeLegion(ctx, runtime, A, B, C, apart, bpart, cpart, gd); });
+  benchmark(ctx, runtime, [&]() { computeLegion(ctx, runtime, A, B, C, apart, bpart, cpart, gd); });
 
-  tacoValidate<valType>(ctx, runtime, A, valType(n));
+  tacoValidate<valType>(ctx, runtime, A, apart, valType(n));
 }
 
 TACO_MAIN(valType)

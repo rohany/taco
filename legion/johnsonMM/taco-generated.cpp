@@ -2,12 +2,14 @@
 #include "taco_legion_header.h"
 #include "taco_mapper.h"
 #include "task_ids.h"
+#include "taco/version.h"
 #define TACO_MIN(_a,_b) ((_a) < (_b) ? (_a) : (_b))
 using namespace Legion;
 typedef FieldAccessor<READ_ONLY,double,2,coord_t,Realm::AffineAccessor<double,2,coord_t>> AccessorROdouble2;
 typedef ReductionAccessor<SumReduction<double>,true,2,coord_t,Realm::AffineAccessor<double,2,coord_t>> AccessorReducedouble2;
 
 struct task_1Args {
+  int32_t shardingID;
   int32_t dim0;
   int32_t dim1;
   int32_t dim2;
@@ -92,8 +94,11 @@ void placeLegionA(Context ctx, Runtime* runtime, LogicalRegion a, LogicalPartiti
   }
   RegionRequirement aReq = RegionRequirement(aLogicalPartition, 15451, READ_ONLY, EXCLUSIVE, get_logical_region(a));
   aReq.add_field(FID_VAL);
+  std::vector<int> dims = {gridDim, gridDim, gridDim};
+  registerPlacementShardingFunctor(ctx, runtime, shardingID(420), dims);
   task_1Args taskArgsRaw;
   // TODO (rohany): Add a sharding functor ID here.
+  taskArgsRaw.shardingID = shardingID(420);
   taskArgsRaw.dim0 = gridDim;
   taskArgsRaw.dim1 = gridDim;
   taskArgsRaw.dim2 = gridDim;
@@ -101,8 +106,7 @@ void placeLegionA(Context ctx, Runtime* runtime, LogicalRegion a, LogicalPartiti
   TaskArgument taskArgs = TaskArgument(&taskArgsRaw, sizeof(task_1Args));
   IndexLauncher launcher = IndexLauncher(taskID(1), domain, taskArgs, ArgumentMap());
   launcher.add_region_requirement(aReq);
-  // TODO (rohany): Change this to placement shard.
-  launcher.tag = TACOMapper::PLACEMENT;
+  launcher.tag = TACOMapper::PLACEMENT_SHARD;
   auto fm = runtime->execute_index_space(ctx, launcher);
   fm.wait_all_results();
 }
@@ -338,25 +342,41 @@ void computeLegion(Context ctx, Runtime* runtime,
 void registerTacoTasks() {
   {
     TaskVariantRegistrar registrar(taskID(1), "task_1");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (TACO_FEATURE_OPENMP) {
+      registrar.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+    } else {
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    }
     registrar.set_leaf();
     Runtime::preregister_task_variant<task_1>(registrar, "task_1");
   }
   {
     TaskVariantRegistrar registrar(taskID(2), "task_2");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (TACO_FEATURE_OPENMP) {
+      registrar.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+    } else {
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    }
     registrar.set_leaf();
     Runtime::preregister_task_variant<task_2>(registrar, "task_2");
   }
   {
     TaskVariantRegistrar registrar(taskID(3), "task_3");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (TACO_FEATURE_OPENMP) {
+      registrar.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+    } else {
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    }
     registrar.set_leaf();
     Runtime::preregister_task_variant<task_3>(registrar, "task_3");
   }
   {
     TaskVariantRegistrar registrar(taskID(4), "task_4");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (TACO_FEATURE_OPENMP) {
+      registrar.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+    } else {
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    }
     registrar.set_leaf();
     Runtime::preregister_task_variant<task_4>(registrar, "task_4");
   }
