@@ -79,14 +79,12 @@ void placeLegionA(Context ctx, Runtime* runtime, LogicalRegion a, LogicalPartiti
   public:
     PlaceProjFunc(Runtime* runtime) : ProjectionFunctor(runtime) {}
     using ProjectionFunctor::project;
-    LogicalRegion project(const Mappable *mappable, unsigned index,
-                          LogicalPartition upper_bound,
-                          const DomainPoint &point) override {
-      auto task = mappable->as_task();
-      assert(task != NULL);
+    LogicalRegion project(LogicalPartition upper_bound,
+      const DomainPoint &point, const Domain& launch_domain) override {
       auto target = Point<2>(point[0], point[1]);
       return runtime->get_logical_subregion_by_color(upper_bound, target);
     }
+    virtual bool is_functional() const { return true; }
     virtual unsigned get_depth() const { return 0; }
   };
   if (reg) {
