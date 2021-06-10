@@ -188,16 +188,22 @@ TEST(distributed, cannonMM) {
   a(i, j) = b(i, k) * c(k, j);
   auto stmt = a.getAssignment().concretize();
   stmt = stmt
-      .distributeOnto({i, j}, {in, jn}, {il, jl}, a(i, j))
       .divide(k, ko, ki, gx)
-      .reorder({ko, il, jl})
-      .stagger(ko, {in, jn}, kos)
-      .pushCommUnder(b(i, k), kos)
-      .pushCommUnder(c(k, j), kos)
+      .reorder({ko, i, j, ki})
+      .distributeOnto({i, j}, {in, jn}, {il, jl}, a(i, j))
+      // TODO (rohany): No clue how stagger works when it is over these...
+//      .stagger(ko, {in, jn}, kos)
+      .pushCommUnder(b(i, k), in)
+      .pushCommUnder(c(k, j), in)
+      // .pushCommUnder(b(i, k), kos)
+      // .pushCommUnder(c(k, j), kos)
       .swapLeafKernel(il, gemm)
       ;
 
   auto lowered = lower(stmt, "computeLegion", false, true);
+  // std::cout << stmt << std::endl;
+  // std::cout << lowered << std::endl;
+  // return;
   // Code-generate all of the placement and compute code.
   auto all = ir::Block::make({placeALowered, placeBLowered, placeCLowered, lowered});
   auto codegen = std::make_shared<ir::CodegenLegionC>(std::cout, taco::ir::CodeGen::ImplementationGen);
@@ -262,13 +268,14 @@ TEST(distributed, cuda_cannonMM) {
 
 TEST(distributed, johnsonMM) {
   int dim = 10;
-  Tensor<int> a("a", {dim, dim}, Format{Dense, Dense});
-  Tensor<int> b("b", {dim, dim}, Format{Dense, Dense});
-  Tensor<int> c("c", {dim, dim}, Format{Dense, Dense});
+  Tensor<double> a("a", {dim, dim}, Format{Dense, Dense});
+  Tensor<double> b("b", {dim, dim}, Format{Dense, Dense});
+  Tensor<double> c("c", {dim, dim}, Format{Dense, Dense});
 
   // Each tensor lives on a different face of the processor cube.
-  auto grid = Grid(2, 2);
-  auto cube = Grid(2, 2, 2);
+  auto gx = ir::Var::make("gridDim", Int32, false, false, true);
+  auto grid = Grid(gx, gx);
+  auto cube = Grid(gx, gx, gx);
   auto placeA = a.partition(grid).place(cube, GridPlacement({0, 1, Face(0)}));
   auto placeB = b.partition(grid).place(cube, GridPlacement({0, Face(0), 1}));
   auto placeC = c.partition(grid).place(cube, GridPlacement({Face(0), 0, 1}));
@@ -278,12 +285,14 @@ TEST(distributed, johnsonMM) {
 
   IndexVar i("i"), j("j"), k("k"), in("in"), il("il"), jn("jn"), jl("jl"), kn("kn"), kl("kl");
   a(i, j) = b(i, k) * c(k, j);
+  std::shared_ptr<LeafCallInterface> gemm = std::make_shared<GEMM>();
   auto stmt = a.getAssignment().concretize();
   stmt = stmt
       .distribute({i, j, k}, {in, jn, kn}, {il, jl, kl}, cube)
       .pushCommUnder(a(i, j), kn)
       .pushCommUnder(b(i, k), kn)
       .pushCommUnder(c(k, j), kn)
+      .swapLeafKernel(il, gemm)
       ;
   auto lowered = lower(stmt, "computeLegion", false, true);
   // Code-generate all of the placement and compute code.
