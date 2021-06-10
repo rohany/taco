@@ -263,55 +263,43 @@ void task_4(const Task* task, const std::vector<PhysicalRegion>& regions, Contex
 void computeLegion(Context ctx, Runtime* runtime,
                    LogicalRegion a, LogicalRegion b, LogicalRegion c,
                    LogicalPartition aPart, LogicalPartition bPart, LogicalPartition cPart, int32_t gridDim) {
-  int a1_dimension = runtime->get_index_space_domain(get_index_space(a)).hi()[0] + 1;
-  int a2_dimension = runtime->get_index_space_domain(get_index_space(a)).hi()[1] + 1;
   auto a_index_space = get_index_space(a);
-  int b1_dimension = runtime->get_index_space_domain(get_index_space(b)).hi()[0] + 1;
-  int b2_dimension = runtime->get_index_space_domain(get_index_space(b)).hi()[1] + 1;
   auto b_index_space = get_index_space(b);
-  int c1_dimension = runtime->get_index_space_domain(get_index_space(c)).hi()[0] + 1;
-  int c2_dimension = runtime->get_index_space_domain(get_index_space(c)).hi()[1] + 1;
   auto c_index_space = get_index_space(c);
 
   class AProjFunc : public ProjectionFunctor {
   public:
     AProjFunc(Runtime* runtime) : ProjectionFunctor(runtime) {}
     using ProjectionFunctor::project;
-    LogicalRegion project(const Mappable *mappable, unsigned index,
-                          LogicalPartition upper_bound,
-                          const DomainPoint &point) override {
-      auto task = mappable->as_task();
-      assert(task != NULL);
+    LogicalRegion project(LogicalPartition upper_bound,
+                          const DomainPoint &point, const Domain& launch_domain) override {
       auto target = Point<2>(point[0], point[1]);
       return runtime->get_logical_subregion_by_color(upper_bound, target);
     }
+    virtual bool is_functional() const { return true; }
     virtual unsigned get_depth() const { return 0; }
   };
   class BProjFunc : public ProjectionFunctor {
   public:
     BProjFunc(Runtime* runtime) : ProjectionFunctor(runtime) {}
     using ProjectionFunctor::project;
-    LogicalRegion project(const Mappable *mappable, unsigned index,
-                          LogicalPartition upper_bound,
-                          const DomainPoint &point) override {
-      auto task = mappable->as_task();
-      assert(task != NULL);
-      auto target = Point<2>(point[0], point[2]);
+    LogicalRegion project(LogicalPartition upper_bound,
+      const DomainPoint &point, const Domain& launch_domain) override {
+          auto target = Point<2>(point[0], point[2]);
       return runtime->get_logical_subregion_by_color(upper_bound, target);
     }
+    virtual bool is_functional() const { return true; }
     virtual unsigned get_depth() const { return 0; }
   };
   class CProjFunc : public ProjectionFunctor {
   public:
     CProjFunc(Runtime* runtime) : ProjectionFunctor(runtime) {}
-    LogicalRegion project(const Mappable *mappable, unsigned index,
-                          LogicalPartition upper_bound,
-                          const DomainPoint &point) override {
-      auto task = mappable->as_task();
-      assert(task != NULL);
+    LogicalRegion project(LogicalPartition upper_bound,
+                          const DomainPoint &point, const Domain& launch_domain) override {
       auto target = Point<2>(point[2], point[1]);
       return runtime->get_logical_subregion_by_color(upper_bound, target);
     }
+    virtual bool is_functional() const { return true; }
     virtual unsigned get_depth() const { return 0; }
   };
   runtime->register_projection_functor(15210, new BProjFunc(runtime), true /* silence_warnings */);

@@ -55,17 +55,15 @@ void top_level_task(const Task* task, const std::vector<PhysicalRegion>& regions
   auto bpart = partitionLegionA(ctx, runtime, B, gd);
   auto cpart = partitionLegionA(ctx, runtime, C, gd);
 
+  // Have the fill operation operate on the same partitions.
   tacoFill<valType>(ctx, runtime, A, apart, 0);
   tacoFill<valType>(ctx, runtime, B, bpart, 1);
   tacoFill<valType>(ctx, runtime, C, cpart, 1);
 
   // Place the tensors.
-
   placeLegionA(ctx, runtime, A, apart, gd, true);
   placeLegionA(ctx, runtime, B, bpart, gd);
   placeLegionA(ctx, runtime, C, cpart, gd);
-//  auto bpart = placeLegionB(ctx, runtime, B, gd);
-//  auto cpart = placeLegionC(ctx, runtime, C, gd);
 
   // Compute on the tensors.
   benchmark(ctx, runtime, [&]() { computeLegion(ctx, runtime, A, B, C, apart, bpart, cpart, gd); });
