@@ -1,6 +1,7 @@
 #include "cblas.h"
 #include "taco_legion_header.h"
 #include "taco_mapper.h"
+#include "taco/version.h"
 #define TACO_MIN(_a,_b) ((_a) < (_b) ? (_a) : (_b))
 using namespace Legion;
 typedef FieldAccessor<READ_ONLY,double,2,coord_t,Realm::AffineAccessor<double,2,coord_t>> AccessorROdouble2;
@@ -332,25 +333,41 @@ void computeLegion(Context ctx, Runtime* runtime, LogicalRegion a, LogicalRegion
 void registerTacoTasks() {
   {
     TaskVariantRegistrar registrar(taskID(1), "task_1");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (TACO_FEATURE_OPENMP) {
+      registrar.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+    } else {
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    }
     registrar.set_leaf();
     Runtime::preregister_task_variant<task_1>(registrar, "task_1");
   }
   {
     TaskVariantRegistrar registrar(taskID(2), "task_2");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (TACO_FEATURE_OPENMP) {
+      registrar.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+    } else {
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    }
     registrar.set_leaf();
     Runtime::preregister_task_variant<task_2>(registrar, "task_2");
   }
   {
     TaskVariantRegistrar registrar(taskID(3), "task_3");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (TACO_FEATURE_OPENMP) {
+      registrar.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+    } else {
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    }
     registrar.set_leaf();
     Runtime::preregister_task_variant<task_3>(registrar, "task_3");
   }
   {
     TaskVariantRegistrar registrar(taskID(4), "task_4");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    if (TACO_FEATURE_OPENMP) {
+      registrar.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+    } else {
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    }
     registrar.set_leaf();
     Runtime::preregister_task_variant<task_4>(registrar, "task_4");
   }
