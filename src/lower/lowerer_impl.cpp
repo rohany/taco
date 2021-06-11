@@ -593,6 +593,9 @@ LowererImpl::lower(IndexStmt stmt, string name,
         for (auto& t : node->transfers) {
           this->requestedTensorVars.insert(t.getAccess().getTensorVar());
         }
+        if (node->computingOn.defined()) {
+          this->requestedTensorVars.insert(node->computingOn);
+        }
       }
 
       // Recurse down the index statement.
@@ -1631,24 +1634,22 @@ Stmt LowererImpl::lowerForallDimension(Forall forall,
 
     // We need to emit accessing the partition for any child task that uses the partition.
     // TODO (rohany): A hack that doesn't scale to nested distributions.
-    struct ContainsPartVar : public IRVisitor {
-      void visit(const Var* var) {
-        if (var == this->targetVar) {
-          this->found = true;
-        }
-      }
-      ir::Expr targetVar;
-      bool found = false;
-    };
-    ContainsPartVar c; c.targetVar = this->provGraph.getPartitionBoundsVar();
-    if (this->provGraph.getPartitionBoundsVar().defined()) {
-      body.accept(&c);
-    }
-    if (forall.getComputingOn().defined() || c.found) {
-      // Add declaration of the partition bounds to the header of the body.
+    if (forall.getComputingOn().defined()) {
+      // Add a declaration of all the needed partition bounds variables.
       auto tensorIspace = ir::GetProperty::make(this->tensorVars[this->computingOnTensorVar], TensorProperty::IndexSpace);
       auto bounds = ir::Call::make("runtime->get_index_space_domain", {ctx, tensorIspace}, Auto);
-      declarePartitionBounds = ir::VarDecl::make(this->provGraph.getPartitionBoundsVar(), bounds);
+      auto boundsVar = ir::Var::make(forall.getComputingOn().getName() + "PartitionBounds", Auto);
+      std::vector<ir::Stmt> declareBlock;
+      declareBlock.push_back(ir::VarDecl::make(boundsVar, bounds));
+      for (auto tvItr : this->provGraph.getPartitionBounds()) {
+        for (auto idxItr : tvItr.second) {
+          auto lo = ir::Load::make(ir::MethodCall::make(boundsVar, "lo", {}, false, Int64), idxItr.first);
+          auto hi = ir::Load::make(ir::MethodCall::make(boundsVar, "hi", {}, false, Int64), idxItr.first);
+          declareBlock.push_back(ir::VarDecl::make(idxItr.second.first, lo));
+          declareBlock.push_back(ir::VarDecl::make(idxItr.second.second, hi));
+        }
+      }
+      declarePartitionBounds = ir::Block::make(declareBlock);
     }
 
     auto domain = ir::Var::make("domain", dimT);
@@ -1715,11 +1716,20 @@ Stmt LowererImpl::lowerForallDimension(Forall forall,
     if (forall.getComputingOn().defined()) {
       auto point = ir::Var::make("domPoint", Datatype("DomainPoint"));
       partStmts.push_back(ir::VarDecl::make(point, ir::Deref::make(domainIter, Auto)));
-      auto partVar = this->provGraph.getPartitionBoundsVar();
+      auto partVar = ir::Var::make(forall.getComputingOn().getName() + "PartitionBounds", Auto);
       auto subreg = ir::Call::make("runtime->get_logical_subregion_by_color", {ctx, this->computingOnPartition, point}, Auto);
       auto subregispace = ir::MethodCall::make(subreg, "get_index_space", {}, false, Auto);
       auto bounds = ir::Call::make("runtime->get_index_space_domain", {subregispace}, Auto);
       partStmts.push_back(ir::VarDecl::make(partVar, bounds));
+      // Declare all of the bounds variables here.
+      for (auto tvItr : this->provGraph.getPartitionBounds()) {
+        for (auto idxItr : tvItr.second) {
+          auto lo = ir::Load::make(ir::MethodCall::make(partVar, "lo", {}, false, Int64), idxItr.first);
+          auto hi = ir::Load::make(ir::MethodCall::make(partVar, "hi", {}, false, Int64), idxItr.first);
+          partStmts.push_back(ir::VarDecl::make(idxItr.second.first, lo));
+          partStmts.push_back(ir::VarDecl::make(idxItr.second.second, hi));
+        }
+      }
     }
 
     // Add a dummy partition object for each transfer.
@@ -1772,7 +1782,8 @@ Stmt LowererImpl::lowerForallDimension(Forall forall,
     // If we're doing a reduction, we're most likely not operating on a disjoint
     // partition. So, fall back to an aliased partition.
     auto partKind = disjointPart;
-    if (forall.getOutputRaceStrategy() == OutputRaceStrategy::ParallelReduction) {
+    // TODO (rohany): This is definitely not as accurate as we can be.
+    if (this->performingLegionReduction) {
       partKind = aliasedPart;
     }
 
