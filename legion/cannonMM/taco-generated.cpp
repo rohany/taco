@@ -35,15 +35,14 @@ void task_1(const Task* task, const std::vector<PhysicalRegion>& regions, Contex
   int32_t jn = getIndexPoint(task, 1);
 }
 
-LogicalPartition placeLegionA(Context ctx, Runtime* runtime, LogicalRegion a, int32_t gridX, int32_t gridY) {
+LogicalPartition partitionLegionA(Context ctx, Runtime* runtime, LogicalRegion a, int32_t gridX, int32_t gridY) {
   int a1_dimension = runtime->get_index_space_domain(get_index_space(a)).hi()[0] + 1;
   int a2_dimension = runtime->get_index_space_domain(get_index_space(a)).hi()[1] + 1;
   auto a_index_space = get_index_space(a);
 
   Point<2> lowerBound = Point<2>(0, 0);
   Point<2> upperBound = Point<2>((gridX - 1), (gridY - 1));
-  auto distFusedIndexSpace = runtime->create_index_space(ctx, Rect<2>(lowerBound, upperBound));
-  DomainT<2> domain = runtime->get_index_space_domain(ctx, IndexSpaceT<2>(distFusedIndexSpace));
+  DomainT<2> domain = DomainT<2>(Rect<2>(lowerBound, upperBound));
   DomainPointColoring aColoring = DomainPointColoring();
   for (PointInDomainIterator<2> itr = PointInDomainIterator<2>(domain); itr.valid(); itr++) {
     int32_t in = (*itr)[0];
@@ -56,8 +55,15 @@ LogicalPartition placeLegionA(Context ctx, Runtime* runtime, LogicalRegion a, in
 
     aColoring[(*itr)] = aRect;
   }
-  auto aPartition = runtime->create_index_partition(ctx, a_index_space, domain, aColoring, LEGION_DISJOINT_COMPLETE_KIND, 15210);
+  auto aPartition = runtime->create_index_partition(ctx, a_index_space, domain, aColoring, LEGION_DISJOINT_COMPLETE_KIND);
   LogicalPartition aLogicalPartition = runtime->get_logical_partition(ctx, get_logical_region(a), aPartition);
+  return aLogicalPartition;
+}
+
+void placeLegionA(Context ctx, Runtime* runtime, LogicalRegion a, LogicalPartition aLogicalPartition, int32_t gridX, int32_t gridY) {
+  Point<2> lowerBound = Point<2>(0, 0);
+  Point<2> upperBound = Point<2>((gridX - 1), (gridY - 1));
+  DomainT<2> domain = DomainT<2>(Rect<2>(lowerBound, upperBound));
   RegionRequirement aReq = RegionRequirement(aLogicalPartition, 0, READ_ONLY, EXCLUSIVE, get_logical_region(a));
   aReq.add_field(FID_VAL);
   task_1Args taskArgsRaw;
@@ -68,8 +74,6 @@ LogicalPartition placeLegionA(Context ctx, Runtime* runtime, LogicalRegion a, in
   launcher.add_region_requirement(aReq);
   auto fm = runtime->execute_index_space(ctx, launcher);
   fm.wait_all_results();
-  return runtime->get_logical_partition(ctx, get_logical_region(a), aPartition);
-
 }
 
 void task_2(const Task* task, const std::vector<PhysicalRegion>& regions, Context ctx, Runtime* runtime) {

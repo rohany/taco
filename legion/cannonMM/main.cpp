@@ -8,7 +8,8 @@ typedef double valType;
 
 // Defined by the generated TACO code.
 void registerTacoTasks();
-LogicalPartition placeLegionA(Context ctx, Runtime* runtime, LogicalRegion a, int32_t gridX, int32_t gridY);
+LogicalPartition partitionLegionA(Context ctx, Runtime* runtime, LogicalRegion a, int32_t grid, int32_t gridy);
+void placeLegionA(Context ctx, Runtime* runtime, LogicalRegion a, LogicalPartition aPart, int32_t gridX, int32_t gridY);
 LogicalPartition placeLegionB(Context ctx, Runtime* runtime, LogicalRegion b, int32_t gridX, int32_t gridY);
 LogicalPartition placeLegionC(Context ctx, Runtime* runtime, LogicalRegion c, int32_t gridX, int32_t gridY);
 // void computeLegion(Context ctx, Runtime* runtime, LogicalRegion a, LogicalRegion b, LogicalRegion c, LogicalPartition part, int32_t gx);
@@ -54,23 +55,33 @@ void top_level_task(const Task* task, const std::vector<PhysicalRegion>& regions
   auto A = runtime->create_logical_region(ctx, ispace, fspace); runtime->attach_name(A, "A");
   auto B = runtime->create_logical_region(ctx, ispace, fspace); runtime->attach_name(B, "B");
   auto C = runtime->create_logical_region(ctx, ispace, fspace); runtime->attach_name(C, "C");
-  runtime->fill_field(ctx, A, A, FID_VAL, valType(0));
-  runtime->fill_field(ctx, B, B, FID_VAL, valType(1));
-  runtime->fill_field(ctx, C, C, FID_VAL, valType(1));
-  // tacoFill<valType>(ctx, runtime, A, 0); tacoFill<valType>(ctx, runtime, B, 1); tacoFill<valType>(ctx, runtime, C, 1);
+  // runtime->fill_field(ctx, A, A, FID_VAL, valType(0));
+  // runtime->fill_field(ctx, B, B, FID_VAL, valType(1));
+  // runtime->fill_field(ctx, C, C, FID_VAL, valType(1));
+
+  auto apart = partitionLegionA(ctx, runtime, A, gx, gy);
+  auto bpart = partitionLegionA(ctx, runtime, B, gx, gy);
+  auto cpart = partitionLegionA(ctx, runtime, C, gx, gy);
+
+  tacoFill<valType>(ctx, runtime, A, apart, 0);
+  tacoFill<valType>(ctx, runtime, B, bpart, 1);
+  tacoFill<valType>(ctx, runtime, C, cpart, 1);
 
   // Place the tensors.
-  auto part = placeLegionA(ctx, runtime, A, gx, gy);
-  auto bPart = placeLegionB(ctx, runtime, B, gx, gy);
-  auto cPart = placeLegionC(ctx, runtime, C, gx, gy);
+//  auto part = placeLegionA(ctx, runtime, A, gx, gy);
+//  auto bPart = placeLegionB(ctx, runtime, B, gx, gy);
+//  auto cPart = placeLegionC(ctx, runtime, C, gx, gy);
+  placeLegionA(ctx, runtime, A, apart, gx, gy);
+  placeLegionA(ctx, runtime, B, bpart, gx, gy);
+  placeLegionA(ctx, runtime, C, cpart, gx, gy);
 
   // initCuBLAS(ctx, runtime);
 
   // Compute on the tensors.
-  benchmark([&]() { computeLegion(ctx, runtime, A, B, C, part, bPart, cPart, gx); });
+  benchmark([&]() { computeLegion(ctx, runtime, A, B, C, apart, bpart, cpart, gx); });
 
   // The result should be equal to 1.
-  // tacoValidate<valType>(ctx, runtime, A, valType(n));
+  tacoValidate<valType>(ctx, runtime, A, apart, valType(n));
 }
 
 TACO_MAIN(valType)
