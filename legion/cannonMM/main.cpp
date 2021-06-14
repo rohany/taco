@@ -63,22 +63,29 @@ void top_level_task(const Task* task, const std::vector<PhysicalRegion>& regions
   auto bpart = partitionLegionA(ctx, runtime, B, gx, gy);
   auto cpart = partitionLegionA(ctx, runtime, C, gx, gy);
 
-  tacoFill<valType>(ctx, runtime, A, apart, 0);
-  tacoFill<valType>(ctx, runtime, B, bpart, 1);
-  tacoFill<valType>(ctx, runtime, C, cpart, 1);
+  for (int i = 0; i < 10; i++) {
+    tacoFill<valType>(ctx, runtime, A, apart, 0);
+    tacoFill<valType>(ctx, runtime, B, bpart, 1);
+    tacoFill<valType>(ctx, runtime, C, cpart, 1);
 
-  // Place the tensors.
-//  auto part = placeLegionA(ctx, runtime, A, gx, gy);
-//  auto bPart = placeLegionB(ctx, runtime, B, gx, gy);
-//  auto cPart = placeLegionC(ctx, runtime, C, gx, gy);
-  placeLegionA(ctx, runtime, A, apart, gx, gy);
-  placeLegionA(ctx, runtime, B, bpart, gx, gy);
-  placeLegionA(ctx, runtime, C, cpart, gx, gy);
+    // Place the tensors.
+//    auto part = placeLegionA(ctx, runtime, A, gx, gy);
+//    auto bPart = placeLegionB(ctx, runtime, B, gx, gy);
+//    auto cPart = placeLegionC(ctx, runtime, C, gx, gy);
+//
+    // placeLegionA(ctx, runtime, A, apart, gx, gy);
+    // placeLegionA(ctx, runtime, B, bpart, gx, gy);
+    // placeLegionA(ctx, runtime, C, cpart, gx, gy);
+    placeLegionB(ctx, runtime, A, gx, gy);
+    placeLegionB(ctx, runtime, B, gx, gy);
+    placeLegionB(ctx, runtime, C, gx, gy);
 
-  // initCuBLAS(ctx, runtime);
+    // initCuBLAS(ctx, runtime);
 
-  // Compute on the tensors.
-  benchmark([&]() { computeLegion(ctx, runtime, A, B, C, apart, bpart, cpart, gx); });
+    // Compute on the tensors.
+    benchmark(ctx, runtime, [&]() { computeLegion(ctx, runtime, A, B, C, apart, bpart, cpart, gx); });
+  }
+
 
   // The result should be equal to 1.
   tacoValidate<valType>(ctx, runtime, A, apart, valType(n));
