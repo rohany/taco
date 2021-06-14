@@ -21,6 +21,18 @@ struct task_3Args {
 };
 struct task_4Args {
   int32_t k;
+  int32_t gridX;
+  int32_t in;
+  int32_t jn;
+  int32_t kos;
+};
+
+struct task_5Args {
+  int32_t b1_dimension;
+  int32_t b2_dimension;
+  int32_t c1_dimension;
+  int32_t c2_dimension;
+  int32_t gridX;
 };
 
 void task_1(const Task* task, const std::vector<PhysicalRegion>& regions, Context ctx, Runtime* runtime) {
@@ -217,119 +229,251 @@ void task_4(const Task* task, const std::vector<PhysicalRegion>& regions, Contex
   );
 }
 
-void computeLegion(Context ctx, Runtime* runtime, LogicalRegion a, LogicalRegion b, LogicalRegion c, LogicalPartition aPartition, LogicalPartition bPart, LogicalPartition cPart, int32_t gridX) {
+void task_5(const Task* task, const std::vector<PhysicalRegion>& regions, Context ctx, Runtime* runtime) {
+  PhysicalRegion a = regions[0];
+  PhysicalRegion b = regions[1];
+  PhysicalRegion c = regions[2];
+
+  int32_t distFused = task->index_point[0];
+  task_5Args* args = (task_5Args*)(task->args);
+  int32_t b1_dimension = args->b1_dimension;
+  int32_t b2_dimension = args->b2_dimension;
+  int32_t c1_dimension = args->c1_dimension;
+  int32_t c2_dimension = args->c2_dimension;
+  int32_t gridX = args->gridX;
+
+  auto a_index_space = get_index_space(a);
+  auto b_index_space = get_index_space(b);
+  auto c_index_space = get_index_space(c);
+
+  int32_t in = getIndexPoint(task, 0);
+  int32_t jn = getIndexPoint(task, 1);
+  Domain aPartitionBounds = runtime->get_index_space_domain(ctx, a_index_space);
+  Point<1> lowerBound = Point<1>(0);
+  Point<1> upperBound = Point<1>((gridX - 1));
+  auto kosIndexSpace = runtime->create_index_space(ctx, Rect<1>(lowerBound, upperBound));
+  DomainT<1> domain = runtime->get_index_space_domain(ctx, IndexSpaceT<1>(kosIndexSpace));
+  DomainPointColoring bColoring = DomainPointColoring();
+  DomainPointColoring cColoring = DomainPointColoring();
+  for (PointInDomainIterator<1> itr = PointInDomainIterator<1>(domain); itr.valid(); itr++) {
+    int32_t kos = (*itr)[0];
+    Point<2> bStart = Point<2>(aPartitionBounds.lo()[0], (((jn + (in + kos)) % gridX) * ((c1_dimension + (gridX - 1)) / gridX) + 0 / gridX));
+    Point<2> bEnd = Point<2>(TACO_MIN(((aPartitionBounds.hi()[0] + 1) - 1), (b1_dimension - 1)), TACO_MIN((((jn + (in + kos)) % gridX) * ((c1_dimension + (gridX - 1)) / gridX) + ((c1_dimension + (gridX - 1)) / gridX - 1)), (b2_dimension - 1)));
+    Rect<2> bRect = Rect<2>(bStart, bEnd);
+    auto bDomain = runtime->get_index_space_domain(ctx, b_index_space);
+    if (!bDomain.contains(bRect.lo) || !bDomain.contains(bRect.hi)) {
+      bRect = bRect.make_empty();
+    }
+    bColoring[(*itr)] = bRect;
+    Point<2> cStart = Point<2>((((jn + (in + kos)) % gridX) * ((c1_dimension + (gridX - 1)) / gridX) + 0 / gridX), aPartitionBounds.lo()[1]);
+    Point<2> cEnd = Point<2>(TACO_MIN((((jn + (in + kos)) % gridX) * ((c1_dimension + (gridX - 1)) / gridX) + ((c1_dimension + (gridX - 1)) / gridX - 1)), (c1_dimension - 1)), TACO_MIN(((aPartitionBounds.hi()[1] + 1) - 1), (c2_dimension - 1)));
+    Rect<2> cRect = Rect<2>(cStart, cEnd);
+    auto cDomain = runtime->get_index_space_domain(ctx, c_index_space);
+    if (!cDomain.contains(cRect.lo) || !cDomain.contains(cRect.hi)) {
+      cRect = cRect.make_empty();
+    }
+    cColoring[(*itr)] = cRect;
+  }
+  auto bPartition = runtime->create_index_partition(ctx, b_index_space, domain, bColoring, LEGION_DISJOINT_COMPLETE_KIND);
+  auto cPartition = runtime->create_index_partition(ctx, c_index_space, domain, cColoring, LEGION_DISJOINT_COMPLETE_KIND);
+  for (PointInDomainIterator<1> itr = PointInDomainIterator<1>(domain); itr.valid(); itr++) {
+    int32_t kos = (*itr);
+    RegionRequirement aReq = RegionRequirement(get_logical_region(a), READ_WRITE, EXCLUSIVE, get_logical_region(a));
+    aReq.add_field(FID_VAL);
+    auto bsubReg = runtime->get_logical_subregion_by_color(ctx, runtime->get_logical_partition(ctx, get_logical_region(b), bPartition), kos);
+    RegionRequirement bReq = RegionRequirement(bsubReg, READ_ONLY, EXCLUSIVE, get_logical_region(b));
+    bReq.add_field(FID_VAL);
+    auto csubReg = runtime->get_logical_subregion_by_color(ctx, runtime->get_logical_partition(ctx, get_logical_region(c), cPartition), kos);
+    RegionRequirement cReq = RegionRequirement(csubReg, READ_ONLY, EXCLUSIVE, get_logical_region(c));
+    cReq.add_field(FID_VAL);
+    task_4Args taskArgsRaw;
+    taskArgsRaw.gridX = gridX;
+    taskArgsRaw.in = in;
+    taskArgsRaw.jn = jn;
+    taskArgsRaw.kos = kos;
+    TaskArgument taskArgs = TaskArgument(&taskArgsRaw, sizeof(task_4Args));
+    TaskLauncher launcher = TaskLauncher(taskID(4), taskArgs);
+    launcher.add_region_requirement(aReq);
+    launcher.add_region_requirement(bReq);
+    launcher.add_region_requirement(cReq);
+    runtime->execute_task(ctx, launcher);
+  }
+
+}
+
+void computeLegion(Context ctx, Runtime* runtime, LogicalRegion a, LogicalRegion b, LogicalRegion c, LogicalPartition aPartition, LogicalPartition bpart, LogicalPartition cpart, int32_t gridX) {
   int b1_dimension = runtime->get_index_space_domain(get_index_space(b)).hi()[0] + 1;
   int b2_dimension = runtime->get_index_space_domain(get_index_space(b)).hi()[1] + 1;
   auto b_index_space = get_index_space(b);
   int c1_dimension = runtime->get_index_space_domain(get_index_space(c)).hi()[0] + 1;
   int c2_dimension = runtime->get_index_space_domain(get_index_space(c)).hi()[1] + 1;
   auto c_index_space = get_index_space(c);
+
   DomainT<2> domain = runtime->get_index_partition_color_space(ctx, get_index_partition(aPartition));
-
-  // I have aPartition here. Need to create bPartition.
-  // DomainPointColoring bHandColoring, cHandColoring;
-  // DomainT<3> iterDomain(Rect<3>({0,0,0}, {domain.bounds.hi[0], domain.bounds.hi[1], gridX - 1}));
-  // DomainT<2> bIKDomain(Rect<2>({0, 0}, {domain.bounds.hi[0], gridX}));
-  // DomainT<2> cKJDomain(Rect<2>({0, 0}, {gridX, domain.bounds.hi[1]}));
-  // for (PointInDomainIterator<3> itr(iterDomain); itr(); itr++) {
-  //   int in = (*itr)[0];
-  //   int jn = (*itr)[1];
-  //   int ko = (*itr)[2];
-  //   auto aPartitionBounds = runtime->get_index_space_domain(runtime->get_logical_subregion_by_color(ctx, aPartition, Point<2>(in, jn)).get_index_space());
-  //   int64_t aPartitionBounds0lo = aPartitionBounds.lo()[0];
-  //   int64_t aPartitionBounds0hi = aPartitionBounds.hi()[0];
-  //   int64_t aPartitionBounds1lo = aPartitionBounds.lo()[1];
-  //   int64_t aPartitionBounds1hi = aPartitionBounds.hi()[1];
-
-  //   Point<2> bStart = Point<2>(aPartitionBounds0lo, (ko * ((c1_dimension + (gridX - 1)) / gridX) + 0 / gridX));
-  //   Point<2> bEnd = Point<2>(TACO_MIN(((((aPartitionBounds0hi - aPartitionBounds0lo) + 1) - 1) + aPartitionBounds0lo),(b1_dimension - 1)), TACO_MIN((ko * ((c1_dimension + (gridX - 1)) / gridX) + ((c1_dimension + (gridX - 1)) / gridX - 1)),(b2_dimension - 1)));
-  //   Rect<2> bRect = Rect<2>(bStart, bEnd);
-  //   // TODO (rohany): Generate bounds code here eventually.
-  //   bHandColoring[Point<2>(in, ko)] = bRect;
-
-  //   Point<2> cStart = Point<2>((ko * ((c1_dimension + (gridX - 1)) / gridX) + 0 / gridX), aPartitionBounds1lo);
-  //   Point<2> cEnd = Point<2>(TACO_MIN((ko * ((c1_dimension + (gridX - 1)) / gridX) + ((c1_dimension + (gridX - 1)) / gridX - 1)),(c1_dimension - 1)), TACO_MIN(((((aPartitionBounds1hi - aPartitionBounds1lo) + 1) - 1) + aPartitionBounds1lo),(c2_dimension - 1)));
-  //   Rect<2> cRect = Rect<2>(cStart, cEnd);
-  //   cHandColoring[Point<2>(ko, jn)] = cRect;
-  // }
-  // auto bPartition = runtime->create_index_partition(ctx, b_index_space, bIKDomain, bHandColoring, LEGION_DISJOINT_COMPLETE_KIND, 15213);
-  // auto cPartition = runtime->create_index_partition(ctx, c_index_space, cKJDomain, cHandColoring, LEGION_DISJOINT_COMPLETE_KIND, 15251);
-
-  // Need to make some projection functors...
-  class BProjFunc : public ProjectionFunctor {
-  public:
-    BProjFunc(Runtime* runtime) : ProjectionFunctor(runtime) {}
-    using ProjectionFunctor::project;
-    LogicalRegion project(const Mappable *mappable, unsigned index,
-                          LogicalPartition upper_bound,
-                          const DomainPoint &point) override {
-      auto task = mappable->as_task();
-      assert(task != NULL);
-
-      // Get out K from the functor.
-      int k = ((int*)(task->args))[0];
-      auto target = Point<2>(point[0], k);
-      return runtime->get_logical_subregion_by_color(upper_bound, target);
+  DomainPointColoring bColoring = DomainPointColoring();
+  DomainPointColoring cColoring = DomainPointColoring();
+  for (PointInDomainIterator<2> itr = PointInDomainIterator<2>(domain); itr.valid(); itr++) {
+    DomainPoint domPoint = (*itr);
+    Domain aPartitionBounds = runtime->get_index_space_domain(runtime->get_logical_subregion_by_color(ctx, aPartition, domPoint).get_index_space());
+    Point<2> bStart = Point<2>(aPartitionBounds.lo()[0], (0 / gridX));
+    Point<2> bEnd = Point<2>(TACO_MIN(((aPartitionBounds.hi()[0] + 1) - 1), (b1_dimension - 1)), TACO_MIN(((gridX - 1) * ((c1_dimension + (gridX - 1)) / gridX) + ((c1_dimension + (gridX - 1)) / gridX - 1)), (b2_dimension - 1)));
+    Rect<2> bRect = Rect<2>(bStart, bEnd);
+    auto bDomain = runtime->get_index_space_domain(ctx, b_index_space);
+    if (!bDomain.contains(bRect.lo) || !bDomain.contains(bRect.hi)) {
+      bRect = bRect.make_empty();
     }
-    LogicalRegion project(const Mappable *mappable, unsigned index,
-                          LogicalRegion upper_bound,
-                          const DomainPoint &point) override {
-      // Shouldn't get here?
-      assert(false);
-      return LogicalRegion();
+    bColoring[(*itr)] = bRect;
+    Point<2> cStart = Point<2>((0 / gridX), aPartitionBounds.lo()[1]);
+    Point<2> cEnd = Point<2>(TACO_MIN(((gridX - 1) * ((c1_dimension + (gridX - 1)) / gridX) + ((c1_dimension + (gridX - 1)) / gridX - 1)), (c1_dimension - 1)), TACO_MIN(((aPartitionBounds.hi()[1] + 1) - 1), (c2_dimension - 1)));
+    Rect<2> cRect = Rect<2>(cStart, cEnd);
+    auto cDomain = runtime->get_index_space_domain(ctx, c_index_space);
+    if (!cDomain.contains(cRect.lo) || !cDomain.contains(cRect.hi)) {
+      cRect = cRect.make_empty();
     }
-    virtual unsigned get_depth() const { return 0; }
-  };
-  class CProjFunc : public ProjectionFunctor {
-  public:
-    CProjFunc(Runtime* runtime) : ProjectionFunctor(runtime) {}
-    LogicalRegion project(const Mappable *mappable, unsigned index,
-                          LogicalPartition upper_bound,
-                          const DomainPoint &point) override {
-      auto task = mappable->as_task();
-      assert(task != NULL);
-
-      // Get out K from the functor.
-      int k = ((int*)(task->args))[0];
-      auto target = Point<2>(k, point[1]);
-      return runtime->get_logical_subregion_by_color(upper_bound, target);
-    }
-    LogicalRegion project(const Mappable *mappable, unsigned index,
-                          LogicalRegion upper_bound,
-                          const DomainPoint &point) override {
-      // Shouldn't get here?
-      assert(false);
-      return LogicalRegion();
-    }
-    virtual unsigned get_depth() const { return 0; }
-  };
-  runtime->register_projection_functor(15210, new BProjFunc(runtime), true /* silence_warnings */);
-  runtime->register_projection_functor(15213, new CProjFunc(runtime), true /* silence_warnings */);
-
-  FutureMap fm;
-  for (int32_t ko = 0; ko < gridX; ko++) {
-    RegionRequirement aReq = RegionRequirement(aPartition, 0, READ_WRITE, EXCLUSIVE, get_logical_region(a));
-    aReq.add_field(FID_VAL);
-//    LogicalPartition bLogicalPartition = runtime->get_logical_partition(ctx, get_logical_region(b), bPartition);
-//    RegionRequirement bReq = RegionRequirement(bLogicalPartition, 15210, READ_ONLY, EXCLUSIVE, get_logical_region(b));
-    RegionRequirement bReq = RegionRequirement(bPart, 15210, READ_ONLY, EXCLUSIVE, get_logical_region(b));
-    bReq.add_field(FID_VAL);
-//    LogicalPartition cLogicalPartition = runtime->get_logical_partition(ctx, get_logical_region(c), cPartition);
-//    RegionRequirement cReq = RegionRequirement(cLogicalPartition, 15213, READ_ONLY, EXCLUSIVE, get_logical_region(c));
-    RegionRequirement cReq = RegionRequirement(cPart, 15213, READ_ONLY, EXCLUSIVE, get_logical_region(c));
-    cReq.add_field(FID_VAL);
-    task_4Args taskArgsRaw;
-    taskArgsRaw.k = ko;
-    TaskArgument taskArgs = TaskArgument(&taskArgsRaw, sizeof(task_4Args));
-    IndexLauncher launcher = IndexLauncher(taskID(4), domain, taskArgs, ArgumentMap());
-    launcher.add_region_requirement(aReq);
-    launcher.add_region_requirement(bReq);
-    launcher.add_region_requirement(cReq);
-    fm = runtime->execute_index_space(ctx, launcher);
-
+    cColoring[(*itr)] = cRect;
   }
+  auto bPartition = runtime->create_index_partition(ctx, b_index_space, domain, bColoring, LEGION_ALIASED_COMPLETE_KIND);
+  auto cPartition = runtime->create_index_partition(ctx, c_index_space, domain, cColoring, LEGION_ALIASED_COMPLETE_KIND);
+  RegionRequirement aReq = RegionRequirement(aPartition, 0, READ_WRITE, EXCLUSIVE, get_logical_region(a));
+  aReq.add_field(FID_VAL);
+  aReq.tag = Mapping::DefaultMapper::VIRTUAL_MAP;
+  LogicalPartition bLogicalPartition = runtime->get_logical_partition(ctx, get_logical_region(b), bPartition);
+  RegionRequirement bReq = RegionRequirement(bLogicalPartition, 0, READ_ONLY, EXCLUSIVE, get_logical_region(b));
+  bReq.add_field(FID_VAL);
+  bReq.tag = Mapping::DefaultMapper::VIRTUAL_MAP;
+  LogicalPartition cLogicalPartition = runtime->get_logical_partition(ctx, get_logical_region(c), cPartition);
+  RegionRequirement cReq = RegionRequirement(cLogicalPartition, 0, READ_ONLY, EXCLUSIVE, get_logical_region(c));
+  cReq.add_field(FID_VAL);
+  cReq.tag = Mapping::DefaultMapper::VIRTUAL_MAP;
+  task_5Args taskArgsRaw;
+  taskArgsRaw.b1_dimension = b1_dimension;
+  taskArgsRaw.b2_dimension = b2_dimension;
+  taskArgsRaw.c1_dimension = c1_dimension;
+  taskArgsRaw.c2_dimension = c2_dimension;
+  taskArgsRaw.gridX = gridX;
+  TaskArgument taskArgs = TaskArgument(&taskArgsRaw, sizeof(task_5Args));
+  IndexLauncher launcher = IndexLauncher(taskID(5), domain, taskArgs, ArgumentMap());
+  launcher.add_region_requirement(aReq);
+  launcher.add_region_requirement(bReq);
+  launcher.add_region_requirement(cReq);
+  auto fm = runtime->execute_index_space(ctx, launcher);
   fm.wait_all_results();
+
 }
+
+// void computeLegion(Context ctx, Runtime* runtime, LogicalRegion a, LogicalRegion b, LogicalRegion c, LogicalPartition aPartition, LogicalPartition bPart, LogicalPartition cPart, int32_t gridX) {
+//   int b1_dimension = runtime->get_index_space_domain(get_index_space(b)).hi()[0] + 1;
+//   int b2_dimension = runtime->get_index_space_domain(get_index_space(b)).hi()[1] + 1;
+//   auto b_index_space = get_index_space(b);
+//   int c1_dimension = runtime->get_index_space_domain(get_index_space(c)).hi()[0] + 1;
+//   int c2_dimension = runtime->get_index_space_domain(get_index_space(c)).hi()[1] + 1;
+//   auto c_index_space = get_index_space(c);
+//   DomainT<2> domain = runtime->get_index_partition_color_space(ctx, get_index_partition(aPartition));
+// 
+//   // I have aPartition here. Need to create bPartition.
+//   DomainPointColoring bHandColoring, cHandColoring;
+//   DomainT<3> iterDomain(Rect<3>({0,0,0}, {domain.bounds.hi[0], domain.bounds.hi[1], gridX - 1}));
+//   DomainT<2> bIKDomain(Rect<2>({0, 0}, {domain.bounds.hi[0], gridX}));
+//   DomainT<2> cKJDomain(Rect<2>({0, 0}, {gridX, domain.bounds.hi[1]}));
+//   for (PointInDomainIterator<3> itr(iterDomain); itr(); itr++) {
+//     int in = (*itr)[0];
+//     int jn = (*itr)[1];
+//     int ko = (*itr)[2];
+//     auto aPartitionBounds = runtime->get_index_space_domain(runtime->get_logical_subregion_by_color(ctx, aPartition, Point<2>(in, jn)).get_index_space());
+//     int64_t aPartitionBounds0lo = aPartitionBounds.lo()[0];
+//     int64_t aPartitionBounds0hi = aPartitionBounds.hi()[0];
+//     int64_t aPartitionBounds1lo = aPartitionBounds.lo()[1];
+//     int64_t aPartitionBounds1hi = aPartitionBounds.hi()[1];
+// 
+//     Point<2> bStart = Point<2>(aPartitionBounds0lo, (ko * ((c1_dimension + (gridX - 1)) / gridX) + 0 / gridX));
+//     Point<2> bEnd = Point<2>(TACO_MIN(((((aPartitionBounds0hi - aPartitionBounds0lo) + 1) - 1) + aPartitionBounds0lo),(b1_dimension - 1)), TACO_MIN((ko * ((c1_dimension + (gridX - 1)) / gridX) + ((c1_dimension + (gridX - 1)) / gridX - 1)),(b2_dimension - 1)));
+//     Rect<2> bRect = Rect<2>(bStart, bEnd);
+//     // TODO (rohany): Generate bounds code here eventually.
+//     bHandColoring[Point<2>(in, ko)] = bRect;
+// 
+//     Point<2> cStart = Point<2>((ko * ((c1_dimension + (gridX - 1)) / gridX) + 0 / gridX), aPartitionBounds1lo);
+//     Point<2> cEnd = Point<2>(TACO_MIN((ko * ((c1_dimension + (gridX - 1)) / gridX) + ((c1_dimension + (gridX - 1)) / gridX - 1)),(c1_dimension - 1)), TACO_MIN(((((aPartitionBounds1hi - aPartitionBounds1lo) + 1) - 1) + aPartitionBounds1lo),(c2_dimension - 1)));
+//     Rect<2> cRect = Rect<2>(cStart, cEnd);
+//     cHandColoring[Point<2>(ko, jn)] = cRect;
+//   }
+//   auto bPartition = runtime->create_index_partition(ctx, b_index_space, bIKDomain, bHandColoring, LEGION_DISJOINT_COMPLETE_KIND, 15213);
+//   auto cPartition = runtime->create_index_partition(ctx, c_index_space, cKJDomain, cHandColoring, LEGION_DISJOINT_COMPLETE_KIND, 15251);
+// 
+//   // Need to make some projection functors...
+//   class BProjFunc : public ProjectionFunctor {
+//   public:
+//     BProjFunc(Runtime* runtime) : ProjectionFunctor(runtime) {}
+//     using ProjectionFunctor::project;
+//     LogicalRegion project(const Mappable *mappable, unsigned index,
+//                           LogicalPartition upper_bound,
+//                           const DomainPoint &point) override {
+//       auto task = mappable->as_task();
+//       assert(task != NULL);
+// 
+//       // Get out K from the functor.
+//       int k = ((int*)(task->args))[0];
+//       auto target = Point<2>(point[0], k);
+//       return runtime->get_logical_subregion_by_color(upper_bound, target);
+//     }
+//     LogicalRegion project(const Mappable *mappable, unsigned index,
+//                           LogicalRegion upper_bound,
+//                           const DomainPoint &point) override {
+//       // Shouldn't get here?
+//       assert(false);
+//       return LogicalRegion();
+//     }
+//     virtual unsigned get_depth() const { return 0; }
+//   };
+//   class CProjFunc : public ProjectionFunctor {
+//   public:
+//     CProjFunc(Runtime* runtime) : ProjectionFunctor(runtime) {}
+//     LogicalRegion project(const Mappable *mappable, unsigned index,
+//                           LogicalPartition upper_bound,
+//                           const DomainPoint &point) override {
+//       auto task = mappable->as_task();
+//       assert(task != NULL);
+// 
+//       // Get out K from the functor.
+//       int k = ((int*)(task->args))[0];
+//       auto target = Point<2>(k, point[1]);
+//       return runtime->get_logical_subregion_by_color(upper_bound, target);
+//     }
+//     LogicalRegion project(const Mappable *mappable, unsigned index,
+//                           LogicalRegion upper_bound,
+//                           const DomainPoint &point) override {
+//       // Shouldn't get here?
+//       assert(false);
+//       return LogicalRegion();
+//     }
+//     virtual unsigned get_depth() const { return 0; }
+//   };
+//   runtime->register_projection_functor(15210, new BProjFunc(runtime), true /* silence_warnings */);
+//   runtime->register_projection_functor(15213, new CProjFunc(runtime), true /* silence_warnings */);
+// 
+//   FutureMap fm;
+//   for (int32_t ko = 0; ko < gridX; ko++) {
+//     RegionRequirement aReq = RegionRequirement(aPartition, 0, READ_WRITE, EXCLUSIVE, get_logical_region(a));
+//     aReq.add_field(FID_VAL);
+//     LogicalPartition bLogicalPartition = runtime->get_logical_partition(ctx, get_logical_region(b), bPartition);
+//     RegionRequirement bReq = RegionRequirement(bLogicalPartition, 15210, READ_ONLY, EXCLUSIVE, get_logical_region(b));
+//     // RegionRequirement bReq = RegionRequirement(bPart, 15210, READ_ONLY, EXCLUSIVE, get_logical_region(b));
+//     bReq.add_field(FID_VAL);
+//     LogicalPartition cLogicalPartition = runtime->get_logical_partition(ctx, get_logical_region(c), cPartition);
+//     RegionRequirement cReq = RegionRequirement(cLogicalPartition, 15213, READ_ONLY, EXCLUSIVE, get_logical_region(c));
+//     // RegionRequirement cReq = RegionRequirement(cPart, 15213, READ_ONLY, EXCLUSIVE, get_logical_region(c));
+//     cReq.add_field(FID_VAL);
+//     task_4Args taskArgsRaw;
+//     taskArgsRaw.k = ko;
+//     TaskArgument taskArgs = TaskArgument(&taskArgsRaw, sizeof(task_4Args));
+//     IndexLauncher launcher = IndexLauncher(taskID(4), domain, taskArgs, ArgumentMap());
+//     launcher.add_region_requirement(aReq);
+//     launcher.add_region_requirement(bReq);
+//     launcher.add_region_requirement(cReq);
+//     fm = runtime->execute_index_space(ctx, launcher);
+// 
+//   }
+//   fm.wait_all_results();
+// }
 void registerTacoTasks() {
   {
     TaskVariantRegistrar registrar(taskID(1), "task_1");
@@ -370,5 +514,15 @@ void registerTacoTasks() {
     }
     registrar.set_leaf();
     Runtime::preregister_task_variant<task_4>(registrar, "task_4");
+  }
+  {
+    TaskVariantRegistrar registrar(taskID(5), "task_5");
+    if (TACO_FEATURE_OPENMP) {
+      registrar.add_constraint(ProcessorConstraint(Processor::OMP_PROC));
+    } else {
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    }
+    registrar.set_inner();
+    Runtime::preregister_task_variant<task_5>(registrar, "task_5");
   }
 }
